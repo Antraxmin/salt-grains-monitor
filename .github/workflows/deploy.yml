@@ -1,0 +1,121 @@
+name: Deploy to Salt Master
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Validate YAML files
+      run: |
+        echo "YAML 파일 검증 중..."
+        python3 -c "
+        import yaml, os, sys
+        error_count = 0
+        for root, dirs, files in os.walk('srv'):
+            for file in files:
+                if file.endswith('.sls'):
+                    path = os.path.join(root, file)
+                    try:
+                        with open(path, 'r') as f:
+                            yaml.safe_load(f)
+                        print(f'✅ {path}')
+                    except Exception as e:
+                        print(f'❌ {path} - ERROR: {e}')
+                        error_count += 1
+
+        if error_count > 0:
+            print(f'❌ {error_count}개 파일에서 오류를 발견했습니다')
+            sys.exit(1)
+        else:
+            print('✅ 모든 YAML 파일 검증이 완료되었습니다')
+        "
+        
+    - name: Deploy to Salt Master
+      if: github.ref == 'refs/heads/main'
+      run: |
+        echo "🚀 Salt Master 서버 배포 시작..."
+        
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SALT_MASTER_SSH_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H "${{ secrets.SALT_MASTER_HOST }}" >> ~/.ssh/known_hosts
+        
+        # 서버에 배포
+        ssh -i ~/.ssh/id_rsa "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}" << 'ENDSSH'
+          set -e
+          
+          # 프로젝트 디렉토리 설정
+          PROJECT_DIR="/opt/salt-grains-monitor"
+          if [ ! -d "$PROJECT_DIR" ]; then
+            echo "📁 프로젝트 디렉토리 생성 중..."
+            sudo mkdir -p "$PROJECT_DIR"
+            sudo chown $(whoami):$(whoami) "$PROJECT_DIR"
+            cd "$PROJECT_DIR"
+            git clone "${{ github.repositoryUrl }}" .
+          else
+            cd "$PROJECT_DIR"
+            echo "최신 코드 업데이트 중..."
+            git fetch origin
+            git reset --hard origin/main
+          fi
+          
+          echo "기존 설정 백업 중..."
+          BACKUP_DIR="/srv/backup/$(date +%Y%m%d_%H%M%S)"
+          sudo mkdir -p "$BACKUP_DIR"
+          if [ -d "/srv/salt" ]; then
+            sudo cp -r /srv/salt "$BACKUP_DIR/" || true
+          fi
+          if [ -d "/srv/pillar" ]; then
+            sudo cp -r /srv/pillar "$BACKUP_DIR/" || true
+          fi
+          
+          # Salt 파일 동기화
+          echo "Salt 파일 동기화 중..."
+          sudo mkdir -p /srv/salt /srv/pillar /srv/reactor
+          sudo rsync -av srv/salt/ /srv/salt/
+          sudo rsync -av --exclude="secrets.sls" srv/pillar/ /srv/pillar/
+          if [ -d "srv/reactor" ]; then
+            sudo rsync -av srv/reactor/ /srv/reactor/
+          fi
+          
+          # 권한 설정
+          sudo chown -R root:root /srv
+          sudo find /srv -type f -exec chmod 644 {} \;
+          sudo find /srv -type d -exec chmod 755 {} \;
+          
+          # Salt Master 재시작
+          echo "Salt Master 재시작 중..."
+          sudo systemctl reload salt-master
+          
+          # 연결 테스트
+          echo "연결 테스트 중..."
+          sleep 5
+          if timeout 30 sudo salt '*' test.ping; then
+            echo "✅ Minion 연결에 성공하였습니다"
+            
+            echo "grains-monitor state 적용 중..."
+            timeout 60 sudo salt '*' state.apply grains-monitor || echo "일부 적용에 실패하였습니다. 수동 확인이 필요합니다. "
+          else
+            echo "⚠️ 일부 Minion 연결에 실패하였습니다. "
+          fi
+          
+          echo "✅ 배포 완료"
+        ENDSSH
+        
+    - name: Notify result
+      if: always()
+      run: |
+        if [ "${{ secrets.DOORAY_WEBHOOK }}" != "" ]; then
+          STATUS=$([ "${{ job.status }}" == "success" ] && echo "✅ 성공" || echo "❌ 실패")
+          curl -X POST "${{ secrets.DOORAY_WEBHOOK }}" \
+            -H 'Content-type: application/json' \
+            --data "{\"text\": \"Salt Grains Monitor 배포 $STATUS\n커밋: \`${{ github.sha }}\`\n시간: $(date)\"}" || true
+        fi
