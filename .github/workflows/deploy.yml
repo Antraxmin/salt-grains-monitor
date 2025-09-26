@@ -54,7 +54,8 @@ jobs:
         ssh -i ~/.ssh/id_rsa "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}" \
           "sudo mkdir -p /srv/backup/\$(date +%Y%m%d_%H%M%S) && \
            sudo cp -r /srv/salt /srv/backup/\$(date +%Y%m%d_%H%M%S)/ 2>/dev/null || true && \
-           sudo mkdir -p ${{ env.DEPLOY_PATH }} /srv/salt /srv/pillar"
+           sudo mkdir -p ${{ env.DEPLOY_PATH }} /srv/salt /srv/pillar && \
+           sudo chown \$(whoami):\$(whoami) ${{ env.DEPLOY_PATH }}"
         
         # 프로젝트 파일 동기화
         rsync -az --delete -e "ssh -i ~/.ssh/id_rsa" \
@@ -81,7 +82,6 @@ jobs:
             sleep 5
             timeout 30 sudo salt '*' test.ping && timeout 60 sudo salt '*' state.apply grains-monitor || true
           else
-            # 개발 환경에서는 파일만 동기화, 실제로 운영환경에 적용하지 않음 
             echo "개발 환경에서의 파일 동기화가 완료되었습니다. 실제 운영환경에는 적용되지 않습니다."
             echo "수동으로 테스트하려면 sudo salt '*' state.apply grains-monitor test=True 명령을 사용하세요."
           fi
