@@ -54,13 +54,16 @@ jobs:
           
           # 프로젝트 디렉토리 설정
           PROJECT_DIR="/opt/salt-grains-monitor"
-          if [ ! -d "$PROJECT_DIR" ]; then
-            echo "📁 프로젝트 디렉토리 생성 중..."
+          
+          if [ ! -d "$PROJECT_DIR/.git" ]; then
+            echo "프로젝트 디렉토리 재설정 및 clone 중..."
+            sudo rm -rf "$PROJECT_DIR" || true  
             sudo mkdir -p "$PROJECT_DIR"
             sudo chown $(whoami):$(whoami) "$PROJECT_DIR"
             cd "$PROJECT_DIR"
             git clone "${{ github.repositoryUrl }}" .
           else
+            # Git 저장소가 존재하면 업데이트
             cd "$PROJECT_DIR"
             echo "최신 코드 업데이트 중..."
             git fetch origin
