@@ -3,39 +3,32 @@ name: Deploy to Salt Master
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
       
     - name: Validate YAML files
       run: |
-        echo "YAML 파일 검증 중..."
         python3 -c "
         import yaml, os, sys
         error_count = 0
-        for root, dirs, files in os.walk('srv'):
+        for root, dirs, files in os.walk('.'):
             for file in files:
                 if file.endswith('.sls'):
                     path = os.path.join(root, file)
                     try:
                         with open(path, 'r') as f:
                             yaml.safe_load(f)
-                        print(f'✅ {path}')
                     except Exception as e:
-                        print(f'❌ {path} - ERROR: {e}')
+                        print(f'ERROR: {path} - {e}')
                         error_count += 1
-
         if error_count > 0:
-            print(f'❌ {error_count}개 파일에서 오류를 발견했습니다')
             sys.exit(1)
-        else:
-            print('✅ 모든 YAML 파일 검증이 완료되었습니다')
         "
     
     - name: Setup SSH
@@ -45,73 +38,38 @@ jobs:
         chmod 600 ~/.ssh/id_rsa
         ssh-keyscan -H "${{ secrets.SALT_MASTER_HOST }}" >> ~/.ssh/known_hosts
         
-    - name: Backup existing files
+    - name: Deploy
       run: |
-        echo "기존 설정 백업 중..."
-        ssh -i ~/.ssh/id_rsa "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}" << 'ENDSSH'
-          BACKUP_DIR="/srv/backup/$(date +%Y%m%d_%H%M%S)"
-          sudo mkdir -p "$BACKUP_DIR"
-          if [ -d "/srv/salt" ]; then
-            sudo cp -r /srv/salt "$BACKUP_DIR/" || true
-          fi
-          if [ -d "/srv/pillar" ]; then
-            sudo cp -r /srv/pillar "$BACKUP_DIR/" || true
-          fi
-        ENDSSH
+        # 기존 파일 백업
+        ssh -i ~/.ssh/id_rsa "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}" \
+          "sudo mkdir -p /srv/backup/\$(date +%Y%m%d_%H%M%S) && \
+           sudo cp -r /srv/salt /srv/backup/\$(date +%Y%m%d_%H%M%S)/ 2>/dev/null || true && \
+           sudo mkdir -p /opt/salt-grains-monitor /srv/salt /srv/pillar"
         
-    - name: Deploy files to Salt Master
-      run: |
-        echo "🚀 Salt Master 서버 배포 시작..."
-        
-        # 프로젝트 디렉토리 생성
-        ssh -i ~/.ssh/id_rsa "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}" << 'ENDSSH'
-          sudo mkdir -p /opt/salt-grains-monitor /srv/salt /srv/pillar /srv/reactor
-          sudo chown $(whoami):$(whoami) /opt/salt-grains-monitor
-        ENDSSH
-        
-        # 파일 동기화
-        echo "파일 동기화 중..."
-        rsync -avz -e "ssh -i ~/.ssh/id_rsa" \
-          --exclude='.git' \
-          --exclude='.github' \
-          --exclude='README.md' \
+        # 프로젝트 파일 동기화
+        rsync -az --delete -e "ssh -i ~/.ssh/id_rsa" \
+          --exclude='.git*' --exclude='README.md' \
           ./ "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}":/opt/salt-grains-monitor/
         
-        # Salt 파일을 적절한 위치로 복사
-        ssh -i ~/.ssh/id_rsa "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}" << 'ENDSSH'
-          set -e
+        # Salt 설정 적용 
+        ssh -i ~/.ssh/id_rsa "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}" << 'EOF'
           cd /opt/salt-grains-monitor
           
-          echo "Salt 파일 동기화 중..."
-          sudo rsync -av srv/salt/ /srv/salt/
-          sudo rsync -av --exclude="secrets.sls" srv/pillar/ /srv/pillar/
-          if [ -d "srv/reactor" ]; then
-            sudo rsync -av srv/reactor/ /srv/reactor/
-          fi
+          # Salt 파일 동기화 (디렉토리가 있을 때만)
+          [ -d "srv/salt" ] && sudo rsync -av srv/salt/ /srv/salt/
+          [ -d "srv/pillar" ] && sudo rsync -av srv/pillar/ /srv/pillar/
+          [ -d "srv/reactor" ] && sudo rsync -av srv/reactor/ /srv/reactor/
           
           # 권한 설정
           sudo chown -R root:root /srv
           sudo find /srv -type f -exec chmod 644 {} \;
           sudo find /srv -type d -exec chmod 755 {} \;
           
-          # Salt Master 재시작
-          echo "Salt Master 재시작 중..."
+          # Salt Master 재시작 + 테스트
           sudo systemctl reload salt-master
-          
-          # 연결 테스트
-          echo "연결 테스트 중..."
           sleep 5
-          if timeout 30 sudo salt '*' test.ping; then
-            echo "✅ Minion 연결에 성공하였습니다"
-            
-            echo "grains-monitor state 적용 중..."
-            timeout 60 sudo salt '*' state.apply grains-monitor || echo "일부 적용에 실패하였습니다. 수동 확인이 필요합니다."
-          else
-            echo "⚠️ 일부 Minion 연결에 실패하였습니다."
-          fi
-          
-          echo "✅ 배포 완료"
-        ENDSSH
+          timeout 30 sudo salt '*' test.ping && timeout 60 sudo salt '*' state.apply grains-monitor || true
+        EOF
         
     - name: Notify result
       if: always()
