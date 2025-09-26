@@ -2,7 +2,7 @@ name: Deploy to Salt Master
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev ]
   workflow_dispatch:
 
 jobs:
@@ -31,6 +31,16 @@ jobs:
             sys.exit(1)
         "
     
+    - name: Set deployment target
+      run: |
+        if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+          echo "DEPLOY_ENV=production" >> $GITHUB_ENV
+          echo "DEPLOY_PATH=/opt/salt-grains-monitor" >> $GITHUB_ENV
+        else
+          echo "DEPLOY_ENV=development" >> $GITHUB_ENV
+          echo "DEPLOY_PATH=/opt/salt-grains-monitor-dev" >> $GITHUB_ENV
+        fi
+    
     - name: Setup SSH
       run: |
         mkdir -p ~/.ssh
@@ -40,35 +50,41 @@ jobs:
         
     - name: Deploy
       run: |
-        # 기존 파일 백업
+        # 환경별로 분리된 백업 진행 + 디렉토리 생성
         ssh -i ~/.ssh/id_rsa "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}" \
           "sudo mkdir -p /srv/backup/\$(date +%Y%m%d_%H%M%S) && \
            sudo cp -r /srv/salt /srv/backup/\$(date +%Y%m%d_%H%M%S)/ 2>/dev/null || true && \
-           sudo mkdir -p /opt/salt-grains-monitor /srv/salt /srv/pillar"
+           sudo mkdir -p ${{ env.DEPLOY_PATH }} /srv/salt /srv/pillar"
         
         # 프로젝트 파일 동기화
         rsync -az --delete -e "ssh -i ~/.ssh/id_rsa" \
           --exclude='.git*' --exclude='README.md' \
-          ./ "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}":/opt/salt-grains-monitor/
+          ./ "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}":${{ env.DEPLOY_PATH }}/
         
-        # Salt 설정 적용 
+        # Salt 설정 적용 (main 브랜치에서만 실제 배포 진행)
         ssh -i ~/.ssh/id_rsa "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}" << 'EOF'
-          cd /opt/salt-grains-monitor
+          cd ${{ env.DEPLOY_PATH }}
           
-          # Salt 파일 동기화 (디렉토리가 있을 때만)
-          [ -d "srv/salt" ] && sudo rsync -av srv/salt/ /srv/salt/
-          [ -d "srv/pillar" ] && sudo rsync -av srv/pillar/ /srv/pillar/
-          [ -d "srv/reactor" ] && sudo rsync -av srv/reactor/ /srv/reactor/
-          
-          # 권한 설정
-          sudo chown -R root:root /srv
-          sudo find /srv -type f -exec chmod 644 {} \;
-          sudo find /srv -type d -exec chmod 755 {} \;
-          
-          # Salt Master 재시작 + 테스트
-          sudo systemctl reload salt-master
-          sleep 5
-          timeout 30 sudo salt '*' test.ping && timeout 60 sudo salt '*' state.apply grains-monitor || true
+          if [ "${{ env.DEPLOY_ENV }}" == "production" ]; then
+            # 운영환경 배포
+            [ -d "srv/salt" ] && sudo rsync -av srv/salt/ /srv/salt/
+            [ -d "srv/pillar" ] && sudo rsync -av srv/pillar/ /srv/pillar/
+            [ -d "srv/reactor" ] && sudo rsync -av srv/reactor/ /srv/reactor/
+            
+            # 권한 설정
+            sudo chown -R root:root /srv
+            sudo find /srv -type f -exec chmod 644 {} \;
+            sudo find /srv -type d -exec chmod 755 {} \;
+            
+            # Salt Master 재시작 + 테스트
+            sudo systemctl reload salt-master
+            sleep 5
+            timeout 30 sudo salt '*' test.ping && timeout 60 sudo salt '*' state.apply grains-monitor || true
+          else
+            # 개발 환경에서는 파일만 동기화, 실제로 운영환경에 적용하지 않음 
+            echo "개발 환경에서의 파일 동기화가 완료되었습니다. 실제 운영환경에는 적용되지 않습니다."
+            echo "수동으로 테스트하려면 sudo salt '*' state.apply grains-monitor test=True 명령을 사용하세요."
+          fi
         EOF
         
     - name: Notify result
@@ -76,7 +92,8 @@ jobs:
       run: |
         if [ "${{ secrets.DOORAY_WEBHOOK }}" != "" ]; then
           STATUS=$([ "${{ job.status }}" == "success" ] && echo "✅ 성공" || echo "❌ 실패")
+          ENV_MSG=$([ "${{ env.DEPLOY_ENV }}" == "production" ] && echo "운영환경" || echo "개발환경")
           curl -X POST "${{ secrets.DOORAY_WEBHOOK }}" \
             -H 'Content-type: application/json' \
-            --data "{\"text\": \"Salt Grains Monitor 배포 $STATUS\n커밋: \`${{ github.sha }}\`\n시간: $(date)\"}" || true
+            --data "{\"text\": \"Salt Grains Monitor 배포 $STATUS ($ENV_MSG)\n브랜치: ${{ github.ref_name }}\n커밋: \`${{ github.sha }}\`\n시간: $(date)\"}" || true
         fi
