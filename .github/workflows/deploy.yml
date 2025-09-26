@@ -37,40 +37,18 @@ jobs:
         else:
             print('✅ 모든 YAML 파일 검증이 완료되었습니다')
         "
-        
-    - name: Deploy to Salt Master
-      if: github.ref == 'refs/heads/main'
+    
+    - name: Setup SSH
       run: |
-        echo "🚀 Salt Master 서버 배포 시작..."
-        
         mkdir -p ~/.ssh
         echo "${{ secrets.SALT_MASTER_SSH_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         ssh-keyscan -H "${{ secrets.SALT_MASTER_HOST }}" >> ~/.ssh/known_hosts
         
-        # 서버에 배포
+    - name: Backup existing files
+      run: |
+        echo "기존 설정 백업 중..."
         ssh -i ~/.ssh/id_rsa "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}" << 'ENDSSH'
-          set -e
-          
-          # 프로젝트 디렉토리 설정
-          PROJECT_DIR="/opt/salt-grains-monitor"
-          
-          if [ ! -d "$PROJECT_DIR/.git" ]; then
-            echo "프로젝트 디렉토리 재설정 및 clone 중..."
-            sudo rm -rf "$PROJECT_DIR" || true  
-            sudo mkdir -p "$PROJECT_DIR"
-            sudo chown $(whoami):$(whoami) "$PROJECT_DIR"
-            cd "$PROJECT_DIR"
-            git clone "${{ github.repositoryUrl }}" .
-          else
-            # Git 저장소가 존재하면 업데이트
-            cd "$PROJECT_DIR"
-            echo "최신 코드 업데이트 중..."
-            git fetch origin
-            git reset --hard origin/main
-          fi
-          
-          echo "기존 설정 백업 중..."
           BACKUP_DIR="/srv/backup/$(date +%Y%m%d_%H%M%S)"
           sudo mkdir -p "$BACKUP_DIR"
           if [ -d "/srv/salt" ]; then
@@ -79,10 +57,32 @@ jobs:
           if [ -d "/srv/pillar" ]; then
             sudo cp -r /srv/pillar "$BACKUP_DIR/" || true
           fi
+        ENDSSH
+        
+    - name: Deploy files to Salt Master
+      run: |
+        echo "🚀 Salt Master 서버 배포 시작..."
+        
+        # 프로젝트 디렉토리 생성
+        ssh -i ~/.ssh/id_rsa "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}" << 'ENDSSH'
+          sudo mkdir -p /opt/salt-grains-monitor /srv/salt /srv/pillar /srv/reactor
+          sudo chown $(whoami):$(whoami) /opt/salt-grains-monitor
+        ENDSSH
+        
+        # 파일 동기화
+        echo "파일 동기화 중..."
+        rsync -avz -e "ssh -i ~/.ssh/id_rsa" \
+          --exclude='.git' \
+          --exclude='.github' \
+          --exclude='README.md' \
+          ./ "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}":/opt/salt-grains-monitor/
+        
+        # Salt 파일을 적절한 위치로 복사
+        ssh -i ~/.ssh/id_rsa "${{ secrets.SALT_MASTER_USER }}"@"${{ secrets.SALT_MASTER_HOST }}" << 'ENDSSH'
+          set -e
+          cd /opt/salt-grains-monitor
           
-          # Salt 파일 동기화
           echo "Salt 파일 동기화 중..."
-          sudo mkdir -p /srv/salt /srv/pillar /srv/reactor
           sudo rsync -av srv/salt/ /srv/salt/
           sudo rsync -av --exclude="secrets.sls" srv/pillar/ /srv/pillar/
           if [ -d "srv/reactor" ]; then
@@ -105,9 +105,9 @@ jobs:
             echo "✅ Minion 연결에 성공하였습니다"
             
             echo "grains-monitor state 적용 중..."
-            timeout 60 sudo salt '*' state.apply grains-monitor || echo "일부 적용에 실패하였습니다. 수동 확인이 필요합니다. "
+            timeout 60 sudo salt '*' state.apply grains-monitor || echo "일부 적용에 실패하였습니다. 수동 확인이 필요합니다."
           else
-            echo "⚠️ 일부 Minion 연결에 실패하였습니다. "
+            echo "⚠️ 일부 Minion 연결에 실패하였습니다."
           fi
           
           echo "✅ 배포 완료"
