@@ -10,8 +10,7 @@ send_grains_data_event:
         minion_id: {{ minion_id }}
         timestamp: {{ current_time }}
         event_type: grains_file_changed
-        all_grains: {{ grains.items() | to_json }} 
-        
+        all_grains: {{ grains.items() | yaml_encode }} 
         trigger_method: systemd_path_unit
     - tag: grains/changed
 
