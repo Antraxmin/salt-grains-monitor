@@ -16,7 +16,7 @@ Minion ID: **' ~ minion_id ~ '** 에서 Grains 파일 변경이 감지되었습�
 ---
 **Minion 전체 Grains 데이터:**
 ```json
-' ~ all_grains | json_encode(indent=2) | truncate(2500, killwords=True, end='...\n```')
+' ~ all_grains | json | truncate(2500, killwords=True, end='...\n```')
 %}
 
 {% set webhook_payload = {
@@ -29,6 +29,6 @@ send_dooray_notification:
     - name: http.query
     - url: {{ webhook_url }}
     - method: POST
-    - data: {{ webhook_payload | json_encode }}
+    - data: {{ webhook_payload | json }}
     - header: 'Content-Type: application/json'
     - verify_ssl: True
