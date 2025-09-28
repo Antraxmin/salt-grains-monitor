@@ -21,7 +21,6 @@ grains_monitor_path_unit:
     - contents: |
         [Unit]
         Description=Monitor Salt Grains Changes
-        Documentation=Salt grains monitoring path unit
         After=salt-minion.service
         
         [Path]
@@ -45,7 +44,6 @@ grains_monitor_service_unit:
     - contents: |
         [Unit]
         Description=Salt Grains Change Handler
-        Documentation=Salt grains change processing service
         After=salt-minion.service
         Wants=salt-minion.service
         
