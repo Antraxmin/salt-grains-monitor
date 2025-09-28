@@ -51,7 +51,7 @@ grains_monitor_service_unit:
         
         [Service]
         Type=oneshot
-        ExecStart=/usr/bin/salt-call --local state.sls grains-monitor.send-event
+        ExecStart=/usr/bin/salt-call state.sls grains-monitor.send-event
         User={{ grains_monitor.service_user }}
         Group={{ grains_monitor.service_user }}
         StandardOutput=journal
