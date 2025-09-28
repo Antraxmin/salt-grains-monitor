@@ -1,18 +1,18 @@
+{% set minion_id = data.get('id', 'UNKNOWN_MINION') %}
 {% set event_data = data.get('data', {}) %}
-{% set minion_id = event_data.get('minion_id', 'UNKNOWN_MINION') %}
-{% set timestamp = event_data.get('timestamp', 'N/A') %}
+{% set minion_id_from_data = event_data.get('minion_id', minion_id) %}
+{% set timestamp = event_data.get('timestamp', none | strftime('%Y-%m-%d %H:%M:%S')) %}
 
 {% set webhook_url = pillar.get('common', {}).get('webhook', {}).get('dooray_url', '') %}
 {% set bot_name = pillar.get('common', {}).get('webhook', {}).get('bot_name', 'SaltBot') %}
 
 send_dooray_notification:
-  local.http.query:
-    - tgt: {{ opts.id }}
+  runner.http.query:
     - url: {{ webhook_url }}
     - method: POST
     - data: |
         {
-          "text": "**[SALT Grains 변경 알림]**\nMinion ID: **{{ minion_id }}**에서 Grains 파일 변경이 감지되었습니다.\n\n* **감지 시간:** {{ timestamp }}\n* **Minion ID:** {{ minion_id }}",
+          "text": "**[SALT Grains 변경 알림]**\nMinion: {{ minion_id }}\n시간: {{ timestamp }}",
           "botName": "{{ bot_name }}"
         }
     - header_dict:
