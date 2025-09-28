@@ -6,9 +6,10 @@
 {% set bot_name = pillar.get('common', {}).get('webhook', {}).get('bot_name', 'SaltBot') %}
 
 send_dooray_notification:
-  runner.http.query:
-    - url: {{ webhook_url }}
+  http.query:
+    - name: https://nhnent.dooray.com/services/3234962574780345705/4157381524754525194/TQ0PuxJiS5yQYAJwVGn4TA
     - method: POST
-    - data: '{"text":"**[SALT Grains 변경 알림]**\nMinion: {{ minion_id }}\n시간: {{ timestamp }}","botName":"{{ bot_name }}"}'
+    - data: '{"text":"Grains 변경 알림 - Minion: {{ minion_id }} - 시간: {{ timestamp }}","botName":"{{ bot_name }}"}'
     - header_dict:
         Content-Type: application/json
+    - status: 200
