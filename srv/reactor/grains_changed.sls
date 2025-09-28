@@ -14,7 +14,7 @@
 
 dooray_runner_alert:
   runner.http.query:
-    - url: {{ webhook_url }}
+    - url: 'https://nhnent.dooray.com/services/3234962574780345705/4157381524754525194/TQ0PuxJiS5yQYAJwVGn4TA'
     - method: POST
     - data: {{ json_payload }}
     - header: 'Content-Type: application/json'
