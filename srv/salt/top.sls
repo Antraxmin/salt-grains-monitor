@@ -1,3 +1,4 @@
 base:
   '*':
     - core
+    - grains-monitor
