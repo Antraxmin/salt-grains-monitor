@@ -1,0 +1,2 @@
+grains-monitor:
+  enabled: true
