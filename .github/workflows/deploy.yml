@@ -23,9 +23,18 @@ jobs:
                     path = os.path.join(root, file)
                     try:
                         with open(path, 'r') as f:
-                            yaml.safe_load(f)
+                            content = f.read()
+                            if '{%' in content or '{{' in content:
+                                print(f'⚠️  {path} - Jinja2 template (basic check only)')
+                                if content.count('{%') != content.count('%}'):
+                                    raise Exception('Unmatched Jinja2 template tags')
+                                if content.count('{{') != content.count('}}'):
+                                    raise Exception('Unmatched Jinja2 variable tags')
+                            else:
+                                yaml.safe_load(content)
+                                print(f'✅ {path}')
                     except Exception as e:
-                        print(f'ERROR: {path} - {e}')
+                        print(f'❌ {path} - ERROR: {e}')
                         error_count += 1
         if error_count > 0:
             sys.exit(1)
