@@ -10,12 +10,10 @@
     'botName': bot_name
 } %}
 
-- name: dooray_alert
-  fun: http.query
-  client: local
-  args:
+dooray_runner_alert:
+  runner.http.query:
     - url: {{ webhook_url }}
     - method: POST
     - data: {{ webhook_payload | json }}
     - header: 'Content-Type: application/json'
-    - verify_ssl: False 
+    - verify_ssl: False
