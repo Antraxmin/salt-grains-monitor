@@ -1,0 +1,25 @@
+{% set common = salt['pillar.get']('common', {}) %}
+{% set grains_monitor = salt['pillar.get']('grains-monitor', {}) %}
+
+{% set defaults = {
+    'unit_name': common.get('systemd', {}).get('path_unit_name', 'grains-monitor'),
+    'enabled': true,
+    'watch_paths': common.get('systemd', {}).get('watch_paths', [
+        '/etc/salt/grains',
+        '/etc/salt/grains.d',
+        '/etc/salt/minion'
+    ]),
+    'cache_dir': common.get('paths', {}).get('cache_dir', '/var/cache/salt-grains'),
+    'log_dir': common.get('paths', {}).get('log_dir', '/var/log/grains-monitor'),
+    'temp_dir': common.get('paths', {}).get('temp_dir', '/tmp/grains-monitor'),
+    'backup_dir': common.get('paths', {}).get('backup_base', '/backup/grains'),
+    'service_user': 'root',
+    'webhook_url': common.get('webhook', {}).get('dooray_url', ''),
+    'master_ip': common.get('master_ip', ''),
+    'bot_name': common.get('webhook', {}).get('bot_name', 'Salt Grains Monitor'),
+    'timeout': common.get('webhook', {}).get('timeout', 30)
+} %}
+
+{% do defaults.update(grains_monitor) %}
+
+{% set grains_monitor = defaults %}
