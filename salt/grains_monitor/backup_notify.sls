@@ -69,9 +69,16 @@ commit_grains_changes:
 send_dooray_notification:
   cmd.run:
     - name: |
+        DIFF=$(cat /tmp/grains_changes_{{ minion_id }}.txt 2>/dev/null | head -c 800)
+        JSON_PAYLOAD=$(jq -n \
+          --arg minion "{{ minion_id }}" \
+          --arg time "{{ timestamp }}" \
+          --arg diff "$DIFF" \
+          --arg repo "{{ git_repo_path }}" \
+          '{botName: "Grains Monitor", text: "[Grains 변경 알림]\n\nMinion: \($minion)\n변경 시간: \($time)\n\n변경 내용:\n```diff\n\($diff)\n```\n\nGit Repo: \($repo)"}')
         curl -X POST '{{ webhook_url }}' \
           -H 'Content-Type: application/json' \
-          -d '{"botName": "Grains Monitor", "text": "[Grains 변경 알림]\n\nMinion: `{{ minion_id }}`\n변경 시간: `{{ timestamp }}`\n\n변경 내용:\n```diff\n{{ filtered_diff[:1000] | replace("'", "'\"'\"'") | replace('\n', '\\n') }}\n```\n\nGit Repo: `{{ git_repo_path }}`"}'
+          -d "$JSON_PAYLOAD"
     - require:
       - cmd: commit_grains_changes
 
