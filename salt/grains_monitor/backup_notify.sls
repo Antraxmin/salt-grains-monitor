@@ -28,10 +28,7 @@ create_grains_directory:
 save_grains_file:
   file.managed:
     - name: {{ grains_file }}
-    - contents: |
-        # Backup Time: {{ timestamp }}
-        # Minion: {{ minion_id }}
-        {{ grains_content }}
+    - contents_pillar: grains_content
     - makedirs: True
     - require:
       - file: create_grains_directory
