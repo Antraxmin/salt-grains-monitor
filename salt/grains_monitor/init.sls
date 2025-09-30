@@ -12,7 +12,7 @@ grains_monitor_service_file:
         [Service]
         Type=oneshot
         ExecStartPre=/bin/sleep 0.5
-        ExecStart=/bin/bash -c 'GRAINS_B64=$(cat /etc/salt/grains | base64 -w 0); salt-call event.send "grains/change" data="{\"grains_base64\":\"$GRAINS_B64\", \"minion_id\":\"$(salt-call --local grains.get id --out=newline_values_only)\"}"'
+        ExecStart=/usr/bin/python3 -c "import subprocess, json; data=open('/etc/salt/grains').read(); subprocess.run(['salt-call', 'event.send', 'grains/change', 'data=' + json.dumps({'data': data})])"
         User=root
         StandardOutput=journal
         StandardError=journal
