@@ -7,7 +7,7 @@
 
 backup_and_notify_grains:
   local.state.apply:
-    - tgt: salt-master # 대상 
+    - tgt: {{ data['id'] }} # 대상
     - arg:
       - grains_monitor.backup_notify    # 실행할 state 
     - kwarg:   # backup_notify state로 전달할 데이터 
