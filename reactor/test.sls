@@ -1,15 +1,17 @@
-{% set dooray_msg = "https://nhnent.dooray.com/services/3234962574780345705/4157381524754525194/TQ0PuxJiS5yQYAJwVGn4TA" %}
-{% set message = {
-    "botName": "%s" % (data['id']),
-    "text": "%s" % (data['data']['data'])
-} %}
+# grains/changed 이벤트 태그 날아왔을때 반응할 Reactor
+# 이벤트에서 전달되는 전체 Grains 데이터를 Custom State에 넘겨주기 
+     # 1. Git 백업하는 기능 
+     # 2. Git diff로 실제 변경된 내용 구해서 Dooray Webhook으로 전달하는 기능
+     # 위 두 기능을 분리된 State로 구현해도 되고, 하나의 State로 통합해도됨 
+     # Master에도 Minion 설치했기 때문에 위의 State는 모두 salt-master에서 실행되도록 
 
-send_message:
-  runner.http.query:
+backup_and_notify_grains:
+  local.state.apply:
+    - tgt: salt-master # 대상 
     - arg:
-      - {{ dooray_msg }}
-    - kwarg:
-        method: POST
-        header_dict:
-          Content-Type: application/json
-        data: '{{ message|json }}'
+      - grains_monitor.backup_notify    # 실행할 state 
+    - kwarg:   # backup_notify state로 전달할 데이터 
+        pillar:
+          minion_id: {{ data['id'] }}
+          timestamp: {{ data['_stamp'] }}
+          grains_content: {{ data.get('data', {}).get('data', '') }}
