@@ -7,11 +7,12 @@
 
 backup_and_notify_grains:
   local.state.apply:
-    - tgt: {{ data['id'] }} # 대상
+    - tgt: salt-master
     - arg:
-      - grains_monitor.backup_notify    # 실행할 state 
-    - kwarg:   # backup_notify state로 전달할 데이터 
+      - grains_monitor.backup_notify
+    - kwarg:
         pillar:
           minion_id: {{ data['id'] }}
           timestamp: {{ data['_stamp'] }}
-          grains_content: {{ data.get('data', {}).get('data', '') }}
+          grains_content: |
+            {{ data.get('data', {}).get('data', '') | indent(12) }}
