@@ -46,49 +46,15 @@ git_prepare:
 extract_changes_only:
   cmd.run:
     - name: |
-        COMMIT_COUNT=$(git log --oneline -- grains/{{ minion_id }}.txt 2>/dev/null | wc -l)
-        if [ "$COMMIT_COUNT" -gt 0 ]; then
-          git diff --cached --unified=0 grains/{{ minion_id }}.txt | \
-          grep -E '^(\+[^+]|-[^-])' > /tmp/grains_changes_{{ minion_id }}.txt || echo "No changes" > /tmp/grains_changes_{{ minion_id }}.txt
-        else
-          echo "__INITIAL_SETUP__" > /tmp/grains_changes_{{ minion_id }}.txt
-        fi
+        git diff --cached --unified=0 grains/{{ minion_id }}.txt | \
+        grep -E '^(\+[^+]|-[^-])' > /tmp/grains_changes_{{ minion_id }}.txt || echo "No changes" > /tmp/grains_changes_{{ minion_id }}.txt
     - cwd: {{ git_repo_path }}
     - require:
       - cmd: git_prepare
 
 {% set filtered_diff = salt['cmd.run']('cat /tmp/grains_changes_' ~ minion_id ~ '.txt') %}
 
-{% if filtered_diff == '__INITIAL_SETUP__' %}
-
-commit_grains_changes:
-  cmd.run:
-    - name: git commit -m "Initial grains setup for {{ minion_id }} at {{ timestamp }}"
-    - cwd: {{ git_repo_path }}
-    - require:
-      - cmd: extract_changes_only
-
-send_dooray_notification:
-  cmd.run:
-    - name: |
-        JSON_PAYLOAD=$(jq -n \
-          --arg minion "{{ minion_id }}" \
-          --arg time "{{ timestamp }}" \
-          --arg repo "{{ git_repo_path }}" \
-          '{botName: "Grains Monitor", text: "✅ **Grains 모니터링 시작**\n\n**Minion:** `\($minion)`\n**연동 시간:** `\($time)`\n\n`\($minion)` 서버의 Grains 모니터링이 정상적으로 시작되었습니다.\n이후 Grains 변경사항이 자동으로 백업되고 알림됩니다.\n\n**Git Repo:** `\($repo)`"}')
-        curl -X POST '{{ webhook_url }}' \
-          -H 'Content-Type: application/json' \
-          -d "$JSON_PAYLOAD"
-    - require:
-      - cmd: commit_grains_changes
-
-cleanup_temp_file:
-  file.absent:
-    - name: /tmp/grains_changes_{{ minion_id }}.txt
-    - require:
-      - cmd: send_dooray_notification
-
-{% elif filtered_diff and filtered_diff != 'No changes' %}
+{% if filtered_diff and filtered_diff != 'No changes' %}
 
 commit_grains_changes:
   cmd.run:
@@ -106,7 +72,7 @@ send_dooray_notification:
           --arg time "{{ timestamp }}" \
           --arg diff "$DIFF" \
           --arg repo "{{ git_repo_path }}" \
-          '{botName: "Grains Monitor", text: "🚨 [Grains 변경 알림]\n\nMinion: `\($minion)`\n변경 시간: `\($time)`\n\n변경 내용:\n```diff\n\($diff)\n```\n\nGit Repo: `\($repo)"}')
+          '{botName: "Grains Monitor", text: "[Grains 변경 알림]\n\nMinion: \($minion)\n변경 시간: \($time)\n\n변경 내용:\n```diff\n\($diff)\n```\n\nGit Repo: \($repo)"}')
         curl -X POST '{{ webhook_url }}' \
           -H 'Content-Type: application/json' \
           -d "$JSON_PAYLOAD"
