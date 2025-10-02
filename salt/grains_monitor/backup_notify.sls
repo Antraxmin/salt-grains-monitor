@@ -2,7 +2,7 @@
 {% set timestamp = salt['pillar.get']('timestamp', '') %}
 {% set grains_content = salt['pillar.get']('grains_content', '') %}
 {% set git_repo_path = '/var/salt/grains-backup' %}
-{% set grains_file = git_repo_path ~ '/grains/' ~ minion_id ~ '.txt' %}
+{% set grains_file = git_repo_path ~ '/grains/' ~ minion_id %}
 {% set webhook_url = 'https://nhnent.dooray.com/services/3234962574780345705/4157381524754525194/TQ0PuxJiS5yQYAJwVGn4TA' %}
 {% set github_token = salt['pillar.get']('grains_monitor:github_token', '') %}
 {% set github_repo = salt['pillar.get']('grains_monitor:github_repo', '') %}
@@ -43,7 +43,7 @@ git_prepare:
     - name: |
         git config user.name "Antraxmin"
         git config user.email "antraxmin@naver.com"
-        git add grains/{{ minion_id }}.txt
+        git add grains/{{ minion_id }}
     - cwd: {{ git_repo_path }}
     - require:
       - file: save_grains_file
@@ -51,9 +51,9 @@ git_prepare:
 commit_and_notify:
   cmd.run:
     - name: |
-        COMMIT_COUNT=$(git log --oneline -- grains/{{ minion_id }}.txt 2>/dev/null | wc -l)
+        COMMIT_COUNT=$(git log --oneline -- grains/{{ minion_id }} 2>/dev/null | wc -l)
         if [ "$COMMIT_COUNT" -gt 0 ]; then
-          DIFF=$(git diff --cached --unified=0 grains/{{ minion_id }}.txt | grep -E '^(\+[^+]|-[^-])' || echo "")
+          DIFF=$(git diff --cached --unified=0 grains/{{ minion_id }} | grep -E '^(\+[^+]|-[^-])' || echo "")
           if [ -n "$DIFF" ]; then
             git commit -m "Grains changed on {{ minion_id }} at {{ timestamp }}"
             git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
@@ -74,17 +74,8 @@ commit_and_notify:
           JSON_PAYLOAD=$(jq -n \
             --arg minion "{{ minion_id }}" \
             --arg time "{{ timestamp }}" \
-            --arg repo "{{ git_repo_path }}" \
-            '{
-              botName: "Grains Monitor",
-              attachments: [
-                {
-                  title: ("$minion + " 연동 완료"),
-                  text: ("\n" + $minion + " 서버의 Grains 모니터링이 정상적으로 시작되었습니다."),
-                  color: "green"
-                }
-              ]
-            }')
+            --arg url "$COMMIT_URL" \
+            '{botName: "Grains Monitor", text: ($minion + " 서버의 Grains 모니터링이 정상적으로 시작되었습니다.\n\n" + $time)}')
           curl -X POST '{{ webhook_url }}' \
             -H 'Content-Type: application/json' \
             -d "$JSON_PAYLOAD"
