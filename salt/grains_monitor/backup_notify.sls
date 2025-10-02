@@ -4,6 +4,8 @@
 {% set git_repo_path = '/var/salt/grains-backup' %}
 {% set grains_file = git_repo_path ~ '/grains/' ~ minion_id ~ '.txt' %}
 {% set webhook_url = 'https://nhnent.dooray.com/services/3234962574780345705/4157381524754525194/TQ0PuxJiS5yQYAJwVGn4TA' %}
+{% set github_token = salt['pillar.get']('grains_monitor:github_token', '') %}
+{% set github_repo = salt['pillar.get']('grains_monitor:github_repo', '') %}
 
 init_git_directory:
   file.directory:
@@ -12,9 +14,12 @@ init_git_directory:
 
 init_git_repo:
   cmd.run:
-    - name: git init
+    - name: |
+        if [ ! -d .git ]; then
+          git init -b main
+          git remote add origin {{ github_repo }}
+        fi
     - cwd: {{ git_repo_path }}
-    - unless: test -d {{ git_repo_path }}/.git
     - require:
       - file: init_git_directory
 
@@ -36,63 +41,54 @@ save_grains_file:
 git_prepare:
   cmd.run:
     - name: |
-        git config user.name "Antraxmin" || true
-        git config user.email "antraxmin@naver.com" || true
+        git config user.name "Antraxmin"
+        git config user.email "antraxmin@naver.com"
         git add grains/{{ minion_id }}.txt
     - cwd: {{ git_repo_path }}
     - require:
       - file: save_grains_file
 
-extract_changes_only:
+commit_and_notify:
   cmd.run:
     - name: |
-        git diff --cached --unified=0 grains/{{ minion_id }}.txt | \
-        grep -E '^(\+[^+]|-[^-])' > /tmp/grains_changes_{{ minion_id }}.txt || echo "No changes" > /tmp/grains_changes_{{ minion_id }}.txt
+        COMMIT_COUNT=$(git log --oneline -- grains/{{ minion_id }}.txt 2>/dev/null | wc -l)
+        if [ "$COMMIT_COUNT" -gt 0 ]; then
+          DIFF=$(git diff --cached --unified=0 grains/{{ minion_id }}.txt | grep -E '^(\+[^+]|-[^-])' || echo "")
+          if [ -n "$DIFF" ]; then
+            git commit -m "Grains changed on {{ minion_id }} at {{ timestamp }}"
+            git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
+            DIFF_TRUNCATED=$(echo "$DIFF" | head -c 800)
+            JSON_PAYLOAD=$(jq -n \
+              --arg minion "{{ minion_id }}" \
+              --arg time "{{ timestamp }}" \
+              --arg diff "$DIFF_TRUNCATED" \
+              --arg repo "{{ git_repo_path }}" \
+              '{botName: "Grains Monitor", text: ("Grains 변경 알림 (" + $minion + ")\n\n```diff\n" + $diff + "\n```")}')
+            curl -X POST '{{ webhook_url }}' \
+              -H 'Content-Type: application/json' \
+              -d "$JSON_PAYLOAD"
+          fi
+        else
+          git commit -m "Initial grains setup for {{ minion_id }} at {{ timestamp }}"
+          git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
+          JSON_PAYLOAD=$(jq -n \
+            --arg minion "{{ minion_id }}" \
+            --arg time "{{ timestamp }}" \
+            --arg repo "{{ git_repo_path }}" \
+            '{
+              botName: "Grains Monitor",
+              attachments: [
+                {
+                  title: ("$minion + " 연동 완료"),
+                  text: ("\n" + $minion + " 서버의 Grains 모니터링이 정상적으로 시작되었습니다."),
+                  color: "green"
+                }
+              ]
+            }')
+          curl -X POST '{{ webhook_url }}' \
+            -H 'Content-Type: application/json' \
+            -d "$JSON_PAYLOAD"
+        fi
     - cwd: {{ git_repo_path }}
     - require:
       - cmd: git_prepare
-
-{% set filtered_diff = salt['cmd.run']('cat /tmp/grains_changes_' ~ minion_id ~ '.txt') %}
-
-{% if filtered_diff and filtered_diff != 'No changes' %}
-
-commit_grains_changes:
-  cmd.run:
-    - name: git commit -m "Grains changed on {{ minion_id }} at {{ timestamp }}"
-    - cwd: {{ git_repo_path }}
-    - require:
-      - cmd: extract_changes_only
-
-send_dooray_notification:
-  cmd.run:
-    - name: |
-        DIFF=$(cat /tmp/grains_changes_{{ minion_id }}.txt 2>/dev/null | head -c 800)
-        JSON_PAYLOAD=$(jq -n \
-          --arg minion "{{ minion_id }}" \
-          --arg time "{{ timestamp }}" \
-          --arg diff "$DIFF" \
-          --arg repo "{{ git_repo_path }}" \
-          '{botName: "Grains Monitor", text: ("[Grains 변경 알림] : " + $minion + "\n" + "\n```diff\n" + $diff + "\n```")}')
-        curl -X POST '{{ webhook_url }}' \
-          -H 'Content-Type: application/json' \
-          -d "$JSON_PAYLOAD"
-    - require:
-      - cmd: commit_grains_changes
-
-cleanup_temp_file:
-  file.absent:
-    - name: /tmp/grains_changes_{{ minion_id }}.txt
-    - require:
-      - cmd: send_dooray_notification
-
-{% else %}
-
-log_no_changes:
-  test.succeed_without_changes:
-    - name: No changes detected in grains for {{ minion_id }}
-
-cleanup_empty_file:
-  file.absent:
-    - name: /tmp/grains_changes_{{ minion_id }}.txt
-
-{% endif %}

@@ -1,2 +1,3 @@
 /backup
 /grains_backup
+/pillar/grains_monitor.sls
