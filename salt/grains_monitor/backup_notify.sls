@@ -72,7 +72,7 @@ send_dooray_notification:
           --arg time "{{ timestamp }}" \
           --arg diff "$DIFF" \
           --arg repo "{{ git_repo_path }}" \
-          '{botName: "Grains Monitor", text: "[Grains 변경 알림]\n\nMinion: \($minion)\n변경 시간: \($time)\n\n변경 내용:\n```diff\n\($diff)\n```\n\nGit Repo: \($repo)"}')
+          '{botName: "Grains Monitor", text: ("[Grains 변경 알림] : " + $minion + "\n" + "\n```diff\n" + $diff + "\n```")}')
         curl -X POST '{{ webhook_url }}' \
           -H 'Content-Type: application/json' \
           -d "$JSON_PAYLOAD"
