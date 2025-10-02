@@ -1,0 +1,3 @@
+base:
+  '*':
+    - grains_monitor
