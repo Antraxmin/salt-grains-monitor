@@ -16,3 +16,4 @@ backup_and_notify_grains:
           timestamp: {{ data['_stamp'] }}
           grains_content: |
             {{ data.get('data', {}).get('data', '') | indent(12) }}
+        queue: True
