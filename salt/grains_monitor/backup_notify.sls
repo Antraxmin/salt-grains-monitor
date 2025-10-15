@@ -51,35 +51,74 @@ git_prepare:
 commit_and_notify:
   cmd.run:
     - name: |
-        COMMIT_COUNT=$(git log --oneline -- grains/{{ minion_id }} 2>/dev/null | wc -l)
-        if [ "$COMMIT_COUNT" -gt 0 ]; then
-          DIFF=$(git diff --cached --unified=0 grains/{{ minion_id }} | grep -E '^(\+[^+]|-[^-])' || echo "")
-          if [ -n "$DIFF" ]; then
-            git commit -m "Grains changed on {{ minion_id }} at {{ timestamp }}"
-            git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
-            DIFF_TRUNCATED=$(echo "$DIFF" | head -c 800)
+        set -u
+        LOG=/tmp/grains-monitor.log
+        {
+          echo "===== $(date '+%F %T') start ====="
+          echo "CWD=$(pwd)"
+          echo "git version: $(git --version 2>&1)"
+
+          COMMIT_COUNT=$(git log --oneline -- grains/{{ minion_id }} 2>/dev/null | wc -l | tr -d ' ')
+          echo "COMMIT_COUNT=$COMMIT_COUNT (file=grains/{{ minion_id }})"
+
+          if [ "$COMMIT_COUNT" -gt 0 ]; then
+            echo "[path] incremental-change"
+            git status --porcelain
+            git diff --name-only --cached -- grains/{{ minion_id }}
+            DIFF=$(git diff --no-color --cached --unified=0 -- grains/{{ minion_id }} \
+                   | sed -n 's/^\([+-][^-+].*\)$/\1/p')
+            echo "DIFF_LEN=$(printf '%s' "$DIFF" | wc -c | tr -d ' ')"
+            printf "%s\n" "$DIFF" > /tmp/gm_diff.txt
+
+            if [ -n "$DIFF" ]; then
+              echo "[do] commit+push+webhook (incremental)"
+              git config user.name "Antraxmin"
+              git config user.email "antraxmin@naver.com"
+              git commit -m "Grains changed on {{ minion_id }} at {{ timestamp }}"
+              echo "[git] pushing..."
+              git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main 2>&1 | tee /tmp/gm_gitpush.txt
+
+              DIFF_TRUNCATED=$(printf "%s\n" "$DIFF" | head -c 800)
+              JSON_PAYLOAD=$(jq -n \
+                --arg minion "{{ minion_id }}" \
+                --arg time "{{ timestamp }}" \
+                --arg diff "$DIFF_TRUNCATED" \
+                '{botName: "Grains Monitor", text: ("Grains 변경 알림 (" + $minion + ")\n\n" + $diff)}')
+              echo "$JSON_PAYLOAD" | jq . >/tmp/dooray_payload.json 2>/dev/null || echo "$JSON_PAYLOAD" >/tmp/dooray_payload.json
+
+              HTTP_CODE=$(curl -sS -o /tmp/dooray_resp.txt -w "%{http_code}" \
+                -H 'Content-Type: application/json' -X POST '{{ webhook_url }}' -d "$JSON_PAYLOAD")
+              echo "Dooray HTTP: $HTTP_CODE"
+              [ "$HTTP_CODE" = "200" ] || sed -n '1,200p' /tmp/dooray_resp.txt
+            else
+              echo "[skip] no staged diff"
+            fi
+          else
+            echo "[path] first-time setup"
+            git config user.name "Antraxmin"
+            git config user.email "antraxmin@naver.com"
+            echo "[git] status before first commit:"
+            git status --porcelain
+            git log --oneline -- grains/{{ minion_id }} 2>/dev/null | wc -l
+
+            git commit -m "Initial grains setup for {{ minion_id }} at {{ timestamp }}"
+            echo "[git] pushing (first commit)..."
+            git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main 2>&1 | tee /tmp/gm_gitpush.txt
+
             JSON_PAYLOAD=$(jq -n \
               --arg minion "{{ minion_id }}" \
               --arg time "{{ timestamp }}" \
-              --arg diff "$DIFF_TRUNCATED" \
-              --arg repo "{{ git_repo_path }}" \
-              '{botName: "Grains Monitor", text: ("Grains 변경 알림 (" + $minion + ")\n\n```diff\n" + $diff + "\n```")}')
-            curl -X POST '{{ webhook_url }}' \
-              -H 'Content-Type: application/json' \
-              -d "$JSON_PAYLOAD"
+              '{botName: "Grains Monitor", text: ($minion + " 서버의 Grains 모니터링이 정상적으로 시작되었습니다.\n\n" + $time)}')
+            echo "$JSON_PAYLOAD" | jq . >/tmp/dooray_payload.json 2>/dev/null || echo "$JSON_PAYLOAD" >/tmp/dooray_payload.json
+
+            HTTP_CODE=$(curl -sS -o /tmp/dooray_resp.txt -w "%{http_code}" \
+              -H 'Content-Type: application/json' -X POST '{{ webhook_url }}' -d "$JSON_PAYLOAD")
+            echo "Dooray HTTP: $HTTP_CODE"
+            [ "$HTTP_CODE" = "200" ] || sed -n '1,200p' /tmp/dooray_resp.txt
           fi
-        else
-          git commit -m "Initial grains setup for {{ minion_id }} at {{ timestamp }}"
-          git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
-          JSON_PAYLOAD=$(jq -n \
-            --arg minion "{{ minion_id }}" \
-            --arg time "{{ timestamp }}" \
-            --arg url "$COMMIT_URL" \
-            '{botName: "Grains Monitor", text: ($minion + " 서버의 Grains 모니터링이 정상적으로 시작되었습니다.\n\n" + $time)}')
-          curl -X POST '{{ webhook_url }}' \
-            -H 'Content-Type: application/json' \
-            -d "$JSON_PAYLOAD"
-        fi
+
+          echo "===== end ====="
+        } >>"$LOG" 2>&1
     - cwd: {{ git_repo_path }}
     - require:
       - cmd: git_prepare
