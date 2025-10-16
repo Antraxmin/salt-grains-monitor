@@ -81,7 +81,7 @@ commit_and_notify:
               --arg url    "$COMMIT_URL" \
               --arg diff   "$DIFF_TRUNCATED" \
               '{
-                 botName: "Grains Monitor",
+                 botName: "{{ minion_id }}",
                  text: ("[Grains change on " + $minion + "](" + $url + ")\n\n```diff\n" + $diff + "\n```")
                }')
 
@@ -113,7 +113,7 @@ commit_and_notify:
             --arg minion "{{ minion_id }}" \
             --arg url    "$COMMIT_URL" \
             '{
-               botName: "Grains Monitor",
+               botName: "{{ minion_id }}",
                text: ("[Grains monitoring initialized on " + $minion + "](" + $url + ")")
              }')
 
