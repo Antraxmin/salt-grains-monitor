@@ -54,7 +54,7 @@ commit_and_notify:
         COMMIT_COUNT=$(git log --oneline -- grains/{{ minion_id }} 2>/dev/null | wc -l)
         if [ "$COMMIT_COUNT" -gt 0 ]; then
           DIFF=$(git diff --no-color --cached --unified=0 -- grains/{{ minion_id }} \
-                 | sed -n 's/^\([+-][^-+].*\)$/\1/p' || echo "")
+                 | sed -n 's/^\([+-][^-+].*\)$/\1/p')
           if [ -n "$DIFF" ]; then
             git commit -m "Grains changed on {{ minion_id }} at {{ timestamp }}"
             COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "")
@@ -69,27 +69,32 @@ commit_and_notify:
             else
               BASE_URL=""
             fi
-            [ -n "$BASE_URL" ] && [ -n "$COMMIT_HASH" ] && COMMIT_URL="$BASE_URL/commit/$COMMIT_HASH" || COMMIT_URL=""
+            if [ -n "$BASE_URL" ] && [ -n "$COMMIT_HASH" ]; then
+              COMMIT_URL="$BASE_URL/commit/$COMMIT_HASH"
+            else
+              COMMIT_URL=""
+            fi
             git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
             DIFF_TRUNCATED=$(printf "%s\n" "$DIFF" | head -c 800)
-            if [ -n "$COMMIT_URL" ]; then
-              JSON_PAYLOAD=$(jq -n \
-                --arg minion "{{ minion_id }}" \
-                --arg diff "$DIFF_TRUNCATED" \
-                --arg curl "$COMMIT_URL" \
-                '{botName:"Grains Monitor",
-                  text: ("```text\n" + $diff + "\n```"),
-                  attachments: [ {title: ("Grains change on " + $minion), titleLink: $curl, color: "blue"} ] }')
-            else
-              JSON_PAYLOAD=$(jq -n \
-                --arg minion "{{ minion_id }}" \
-                --arg diff "$DIFF_TRUNCATED" \
-                '{botName:"Grains Monitor",
-                  text: ("```text\n" + $diff + "\n```"),
-                  attachments: [ {title: ("Grains change on " + $minion), color: "blue"} ] }')
-            fi
+            JSON_PAYLOAD=$(jq -n \
+              --arg minion "{{ minion_id }}" \
+              --arg diff   "$DIFF_TRUNCATED" \
+              --arg url    "$COMMIT_URL" \
+              '{
+                 botName: "Grains Monitor",
+                 attachments: [
+                   {
+                     title: ("Grains change on " + $minion),
+                     titleLink: $url,
+                     color: "blue",
+                     text: ("```diff\n" + $diff + "\n```")
+                   }
+                 ]
+               }')
+
             curl -sS -X POST '{{ webhook_url }}' \
-              -H 'Content-Type: application/json' -d "$JSON_PAYLOAD" >/dev/null
+              -H 'Content-Type: application/json' \
+              -d "$JSON_PAYLOAD" >/dev/null
           fi
         else
           git commit -m "Initial grains setup for {{ minion_id }} at {{ timestamp }}"
@@ -105,24 +110,29 @@ commit_and_notify:
           else
             BASE_URL=""
           fi
-          [ -n "$BASE_URL" ] && [ -n "$COMMIT_HASH" ] && COMMIT_URL="$BASE_URL/commit/$COMMIT_HASH" || COMMIT_URL=""
-          git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
-          if [ -n "$COMMIT_URL" ]; then
-            JSON_PAYLOAD=$(jq -n \
-              --arg minion "{{ minion_id }}" \
-              --arg curl "$COMMIT_URL" \
-              '{botName:"Grains Monitor",
-                text: ($minion + " 서버의 Grains 모니터링이 정상적으로 시작되었습니다."),
-                attachments: [ {title: "Initial grains setup", titleLink: $curl, color: "green"} ] }')
+          if [ -n "$BASE_URL" ] && [ -n "$COMMIT_HASH" ]; then
+            COMMIT_URL="$BASE_URL/commit/$COMMIT_HASH"
           else
-            JSON_PAYLOAD=$(jq -n \
-              --arg minion "{{ minion_id }}" \
-              '{botName:"Grains Monitor",
-                text: ($minion + " 서버의 Grains 모니터링이 정상적으로 시작되었습니다."),
-                attachments: [ {title: "Initial grains setup", color: "green"} ] }')
+            COMMIT_URL=""
           fi
+          git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
+          JSON_PAYLOAD=$(jq -n \
+            --arg minion "{{ minion_id }}" \
+            --arg url "$COMMIT_URL" \
+            '{
+               botName: "Grains Monitor",
+               attachments: [
+                 {
+                   title: ("Grains monitoring initialized on " + $minion),
+                   titleLink: $url,
+                   color: "green",
+                   text: ""
+                 }
+               ]
+             }')
           curl -sS -X POST '{{ webhook_url }}' \
-            -H 'Content-Type: application/json' -d "$JSON_PAYLOAD" >/dev/null
+            -H 'Content-Type: application/json' \
+            -d "$JSON_PAYLOAD" >/dev/null
         fi
     - cwd: {{ git_repo_path }}
     - require:
