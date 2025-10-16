@@ -53,33 +53,76 @@ commit_and_notify:
     - name: |
         COMMIT_COUNT=$(git log --oneline -- grains/{{ minion_id }} 2>/dev/null | wc -l)
         if [ "$COMMIT_COUNT" -gt 0 ]; then
-          DIFF=$(git diff --cached --unified=0 grains/{{ minion_id }} | grep -E '^(\+[^+]|-[^-])' || echo "")
+          DIFF=$(git diff --no-color --cached --unified=0 -- grains/{{ minion_id }} \
+                 | sed -n 's/^\([+-][^-+].*\)$/\1/p' || echo "")
           if [ -n "$DIFF" ]; then
             git commit -m "Grains changed on {{ minion_id }} at {{ timestamp }}"
             COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "")
+            REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
+            if printf '%s' "$REMOTE_URL" | grep -q '^git@github\.com:'; then
+              OWNER_REPO=${REMOTE_URL#git@github.com:}; OWNER_REPO=${OWNER_REPO%.git}
+              BASE_URL="https://github.com/$OWNER_REPO"
+            elif printf '%s' "$REMOTE_URL" | grep -q '^https\?://github\.com/'; then
+              OWNER_REPO=${REMOTE_URL#https://github.com/}; OWNER_REPO=${OWNER_REPO#http://github.com/}
+              OWNER_REPO=${OWNER_REPO%.git}
+              BASE_URL="https://github.com/$OWNER_REPO"
+            else
+              BASE_URL=""
+            fi
+            [ -n "$BASE_URL" ] && [ -n "$COMMIT_HASH" ] && COMMIT_URL="$BASE_URL/commit/$COMMIT_HASH" || COMMIT_URL=""
             git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
-            DIFF_TRUNCATED=$(echo "$DIFF" | head -c 800)
-            JSON_PAYLOAD=$(jq -n \
-              --arg minion "{{ minion_id }}" \
-              --arg time "{{ timestamp }}" \
-              --arg diff "$DIFF_TRUNCATED" \
-              --arg repo "{{ git_repo_path }}" \
-              '{botName: "Grains Monitor", text: ("Grains 변경 알림 (" + $minion + ")\n\n" + $diff)}')
-            curl -X POST '{{ webhook_url }}' \
-              -H 'Content-Type: application/json' \
-              -d "$JSON_PAYLOAD"
+            DIFF_TRUNCATED=$(printf "%s\n" "$DIFF" | head -c 800)
+            if [ -n "$COMMIT_URL" ]; then
+              JSON_PAYLOAD=$(jq -n \
+                --arg minion "{{ minion_id }}" \
+                --arg diff "$DIFF_TRUNCATED" \
+                --arg curl "$COMMIT_URL" \
+                '{botName:"Grains Monitor",
+                  text: ("```text\n" + $diff + "\n```"),
+                  attachments: [ {title: ("Grains change on " + $minion), titleLink: $curl, color: "blue"} ] }')
+            else
+              JSON_PAYLOAD=$(jq -n \
+                --arg minion "{{ minion_id }}" \
+                --arg diff "$DIFF_TRUNCATED" \
+                '{botName:"Grains Monitor",
+                  text: ("```text\n" + $diff + "\n```"),
+                  attachments: [ {title: ("Grains change on " + $minion), color: "blue"} ] }')
+            fi
+            curl -sS -X POST '{{ webhook_url }}' \
+              -H 'Content-Type: application/json' -d "$JSON_PAYLOAD" >/dev/null
           fi
         else
           git commit -m "Initial grains setup for {{ minion_id }} at {{ timestamp }}"
+          COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "")
+          REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
+          if printf '%s' "$REMOTE_URL" | grep -q '^git@github\.com:'; then
+            OWNER_REPO=${REMOTE_URL#git@github.com:}; OWNER_REPO=${OWNER_REPO%.git}
+            BASE_URL="https://github.com/$OWNER_REPO"
+          elif printf '%s' "$REMOTE_URL" | grep -q '^https\?://github\.com/'; then
+            OWNER_REPO=${REMOTE_URL#https://github.com/}; OWNER_REPO=${OWNER_REPO#http://github.com/}
+            OWNER_REPO=${OWNER_REPO%.git}
+            BASE_URL="https://github.com/$OWNER_REPO"
+          else
+            BASE_URL=""
+          fi
+          [ -n "$BASE_URL" ] && [ -n "$COMMIT_HASH" ] && COMMIT_URL="$BASE_URL/commit/$COMMIT_HASH" || COMMIT_URL=""
           git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
-          JSON_PAYLOAD=$(jq -n \
-            --arg minion "{{ minion_id }}" \
-            --arg time "{{ timestamp }}" \
-            --arg url "$COMMIT_URL" \
-            '{botName: "Grains Monitor", text: ($minion + " 서버의 Grains 모니터링이 정상적으로 시작되었습니다.\n\n" + $time)}')
-          curl -X POST '{{ webhook_url }}' \
-            -H 'Content-Type: application/json' \
-            -d "$JSON_PAYLOAD"
+          if [ -n "$COMMIT_URL" ]; then
+            JSON_PAYLOAD=$(jq -n \
+              --arg minion "{{ minion_id }}" \
+              --arg curl "$COMMIT_URL" \
+              '{botName:"Grains Monitor",
+                text: ($minion + " 서버의 Grains 모니터링이 정상적으로 시작되었습니다."),
+                attachments: [ {title: "Initial grains setup", titleLink: $curl, color: "green"} ] }')
+          else
+            JSON_PAYLOAD=$(jq -n \
+              --arg minion "{{ minion_id }}" \
+              '{botName:"Grains Monitor",
+                text: ($minion + " 서버의 Grains 모니터링이 정상적으로 시작되었습니다."),
+                attachments: [ {title: "Initial grains setup", color: "green"} ] }')
+          fi
+          curl -sS -X POST '{{ webhook_url }}' \
+            -H 'Content-Type: application/json' -d "$JSON_PAYLOAD" >/dev/null
         fi
     - cwd: {{ git_repo_path }}
     - require:
