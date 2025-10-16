@@ -56,6 +56,7 @@ commit_and_notify:
           DIFF=$(git diff --cached --unified=0 grains/{{ minion_id }} | grep -E '^(\+[^+]|-[^-])' || echo "")
           if [ -n "$DIFF" ]; then
             git commit -m "Grains changed on {{ minion_id }} at {{ timestamp }}"
+            COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "")
             git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
             DIFF_TRUNCATED=$(echo "$DIFF" | head -c 800)
             JSON_PAYLOAD=$(jq -n \
