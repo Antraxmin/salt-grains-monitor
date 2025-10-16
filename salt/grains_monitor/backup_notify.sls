@@ -78,18 +78,11 @@ commit_and_notify:
             DIFF_TRUNCATED=$(printf "%s\n" "$DIFF" | head -c 800)
             JSON_PAYLOAD=$(jq -n \
               --arg minion "{{ minion_id }}" \
-              --arg diff   "$DIFF_TRUNCATED" \
               --arg url    "$COMMIT_URL" \
+              --arg diff   "$DIFF_TRUNCATED" \
               '{
                  botName: "Grains Monitor",
-                 attachments: [
-                   {
-                     title: ("Grains change on " + $minion),
-                     titleLink: $url,
-                     color: "blue",
-                     text: ("```diff\n" + $diff + "\n```")
-                   }
-                 ]
+                 text: ("[Grains change on " + $minion + "](" + $url + ")\n\n```diff\n" + $diff + "\n```")
                }')
 
             curl -sS -X POST '{{ webhook_url }}' \
@@ -118,18 +111,12 @@ commit_and_notify:
           git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
           JSON_PAYLOAD=$(jq -n \
             --arg minion "{{ minion_id }}" \
-            --arg url "$COMMIT_URL" \
+            --arg url    "$COMMIT_URL" \
             '{
                botName: "Grains Monitor",
-               attachments: [
-                 {
-                   title: ("Grains monitoring initialized on " + $minion),
-                   titleLink: $url,
-                   color: "green",
-                   text: ""
-                 }
-               ]
+               text: ("[Grains monitoring initialized on " + $minion + "](" + $url + ")")
              }')
+
           curl -sS -X POST '{{ webhook_url }}' \
             -H 'Content-Type: application/json' \
             -d "$JSON_PAYLOAD" >/dev/null
