@@ -6,6 +6,11 @@
 {% set github_token   = cfg.get('github_token', '') %}
 {% set github_repo    = cfg.get('github_repo', '') %}
 
+{% set git_user_name  = cfg.get('git_user_name', 'Grains Monitor Bot') %}
+{% set git_user_email = cfg.get('git_user_email', 'grains-monitor@example.local') %}
+{% set git_branch     = cfg.get('git_branch', 'main') %}
+{% set diff_max_chars = cfg.get('diff_max_chars', 800) %}
+
 {% set minion_id      = salt['pillar.get']('minion_id', cfg.get('minion_id', 'unknown')) %}
 {% set timestamp      = salt['pillar.get']('timestamp',  cfg.get('timestamp', '')) %}
 {% set grains_content = salt['pillar.get']('grains_content', cfg.get('grains_content', '')) %}
@@ -21,7 +26,7 @@ init_git_repo:
   cmd.run:
     - name: |
         if [ ! -d .git ]; then
-          git init -b main
+          git init -b {{ git_branch }}
           if [ -n "{{ github_repo }}" ]; then
             git remote add origin {{ github_repo }}
           fi
@@ -48,8 +53,8 @@ save_grains_file:
 git_prepare:
   cmd.run:
     - name: |
-        git config user.name "Antraxmin"
-        git config user.email "antraxmin@naver.com"
+        git config user.name "{{ git_user_name }}"
+        git config user.email "{{ git_user_email }}"
         git add grains/{{ minion_id }}
     - cwd: {{ git_repo_path }}
     - require:
@@ -82,7 +87,7 @@ commit_and_notify:
               COMMIT_URL=""
             fi
             git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
-            DIFF_TRUNCATED=$(printf "%s\n" "$DIFF" | head -c 800)
+            DIFF_TRUNCATED=$(printf "%s\n" "$DIFF" | head -c {{ diff_max_chars }})
             JSON_PAYLOAD=$(jq -n \
               --arg minion "{{ minion_id }}" \
               --arg url    "$COMMIT_URL" \
@@ -115,7 +120,7 @@ commit_and_notify:
           else
             COMMIT_URL=""
           fi
-          git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git main
+          git push https://{{ github_token }}@github.com/Antraxmin/grains-backup.git {{ git_branch }}
           JSON_PAYLOAD=$(jq -n \
             --arg minion "{{ minion_id }}" \
             --arg url    "$COMMIT_URL" \
