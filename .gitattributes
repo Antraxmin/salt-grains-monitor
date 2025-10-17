@@ -1,0 +1,2 @@
+*.sls   linguist-language=SaltStack
+*.jinja linguist-language=Jinja
