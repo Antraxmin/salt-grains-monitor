@@ -1,0 +1,38 @@
+{% set defaults = {
+  'region': 'test',
+  'phase': 'beta',
+  'git_repo_path': '/var/salt/grains-backup',
+  'webhook_url': '',
+  'github_token': '',
+  'github_repo': '',
+  'git_user_name': '',
+  'git_user_email': '',
+  'git_branch': '',
+  'diff_max_chars': 800
+} %}
+
+{% set gm = salt['pillar.get']('grains_monitor', {}) %}
+{% set cfg = defaults.copy() %}
+{% do cfg.update(gm) %}
+
+{% set dyn = {
+  'minion_id': salt['pillar.get']('minion_id', gm.get('minion_id', 'unknown')),
+  'timestamp': salt['pillar.get']('timestamp',  gm.get('timestamp', '')),
+  'grains_content': salt['pillar.get']('grains_content', gm.get('grains_content', ''))
+} %}
+{% do cfg.update(dyn) %}
+
+{% if not cfg.git_branch %}{% set _ = cfg.update({'git_branch': 'main'}) %}{% endif %}
+
+{% if cfg.github_repo and cfg.github_token %}
+  {% set repo_https = cfg.github_repo %}
+  {% if repo_https.startswith('git@github.com:') %}
+    {% set owner_repo = repo_https.split(':', 1)[1].rstrip('.git') %}
+    {% set repo_https = 'https://github.com/' + owner_repo + '.git' %}
+  {% endif %}
+  {% set push_url = repo_https.replace('https://', 'https://' ~ cfg.github_token ~ '@') %}
+{% else %}
+  {% set push_url = '' %}
+{% endif %}
+
+{% do cfg.update({'push_url': push_url}) %}
