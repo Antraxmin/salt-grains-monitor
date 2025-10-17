@@ -1,11 +1,16 @@
-{% set minion_id = salt['pillar.get']('minion_id', 'unknown') %}
-{% set timestamp = salt['pillar.get']('timestamp', '') %}
-{% set grains_content = salt['pillar.get']('grains_content', '') %}
-{% set git_repo_path = '/var/salt/grains-backup' %}
+{% set cfg = salt['pillar.get']('grains_monitor', {}) %}
+{% set region         = cfg.get('region', 'test') %}
+{% set phase          = cfg.get('phase',  'beta') %}
+{% set git_repo_path  = cfg.get('git_repo_path', '/var/salt/grains-backup') %}
+{% set webhook_url    = cfg.get('webhook_url', '') %}
+{% set github_token   = cfg.get('github_token', '') %}
+{% set github_repo    = cfg.get('github_repo', '') %}
+
+{% set minion_id      = salt['pillar.get']('minion_id', cfg.get('minion_id', 'unknown')) %}
+{% set timestamp      = salt['pillar.get']('timestamp',  cfg.get('timestamp', '')) %}
+{% set grains_content = salt['pillar.get']('grains_content', cfg.get('grains_content', '')) %}
+
 {% set grains_file = git_repo_path ~ '/grains/' ~ minion_id %}
-{% set webhook_url = 'https://nhnent.dooray.com/services/3234962574780345705/4157381524754525194/TQ0PuxJiS5yQYAJwVGn4TA' %}
-{% set github_token = salt['pillar.get']('grains_monitor:github_token', '') %}
-{% set github_repo = salt['pillar.get']('grains_monitor:github_repo', '') %}
 
 init_git_directory:
   file.directory:
@@ -17,7 +22,9 @@ init_git_repo:
     - name: |
         if [ ! -d .git ]; then
           git init -b main
-          git remote add origin {{ github_repo }}
+          if [ -n "{{ github_repo }}" ]; then
+            git remote add origin {{ github_repo }}
+          fi
         fi
     - cwd: {{ git_repo_path }}
     - require:
