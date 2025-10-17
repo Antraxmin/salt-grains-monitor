@@ -14,3 +14,9 @@ grains_monitor:
   minion_id:
   timestamp:
   grains_content:
+ 
+  # Git config 
+  git_user_name: "your github name"
+  git_user_email: "your github email"
+  git_branch: ""
+  diff_max_chars: 800
