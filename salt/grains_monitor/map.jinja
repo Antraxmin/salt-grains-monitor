@@ -1,3 +1,4 @@
+{# --- 1) 기본값 --- #}
 {% set defaults = {
   'region': 'test',
   'phase': 'beta',
@@ -11,19 +12,32 @@
   'diff_max_chars': 800
 } %}
 
+{# --- 2) Pillar 병합 --- #}
 {% set gm = salt['pillar.get']('grains_monitor', {}) %}
 {% set cfg = defaults.copy() %}
 {% do cfg.update(gm) %}
 
+{# --- 3) 동적값: minion_id / timestamp / grains_content --- #}
+{% set _minion_from_grains = salt['grains.get']('id', None) %}
 {% set dyn = {
-  'minion_id': salt['pillar.get']('minion_id', gm.get('minion_id', 'unknown')),
+  'minion_id': salt['pillar.get']('minion_id', gm.get('minion_id', _minion_from_grains or 'unknown')),
   'timestamp': salt['pillar.get']('timestamp',  gm.get('timestamp', '')),
   'grains_content': salt['pillar.get']('grains_content', gm.get('grains_content', ''))
 } %}
 {% do cfg.update(dyn) %}
 
-{% if not cfg.git_branch %}{% set _ = cfg.update({'git_branch': 'main'}) %}{% endif %}
+{# timestamp 비어있으면 UTC ISO로 채움 #}
+{% if not cfg.timestamp %}
+  {% set _now = salt['cmd.run_stdout']('date -u +%Y-%m-%dT%H:%M:%SZ') %}
+  {% set _ = cfg.update({'timestamp': _now}) %}
+{% endif %}
 
+{# --- 4) git_branch/사용자 기본값 보정 --- #}
+{% if not cfg.git_branch %}{% set _ = cfg.update({'git_branch': 'main'}) %}{% endif %}
+{% if not cfg.git_user_name %}{% set _ = cfg.update({'git_user_name': 'grains-bot'}) %}{% endif %}
+{% if not cfg.git_user_email %}{% set _ = cfg.update({'git_user_email': 'grains-bot@localhost'}) %}{% endif %}
+
+{# --- 5) GitHub push URL 계산(토큰 있을 때만) --- #}
 {% if cfg.github_repo and cfg.github_token %}
   {% set repo_https = cfg.github_repo %}
   {% if repo_https.startswith('git@github.com:') %}
@@ -34,5 +48,9 @@
 {% else %}
   {% set push_url = '' %}
 {% endif %}
-
 {% do cfg.update({'push_url': push_url}) %}
+
+{# --- 6) region/phase 경로 편의값 --- #}
+{% set grains_dir  = cfg.git_repo_path ~ '/grains/' ~ cfg.region ~ '/' ~ cfg.phase %}
+{% set grains_file = grains_dir ~ '/' ~ cfg.minion_id %}
+{% do cfg.update({'grains_dir': grains_dir, 'grains_file': grains_file}) %}
