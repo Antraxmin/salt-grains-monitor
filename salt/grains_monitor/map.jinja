@@ -15,6 +15,11 @@
 {% set cfg = defaults.copy() %}
 {% do cfg.update(gm) %}
 
+{% set region_from_grains = salt['grains.get']('region', None) %}
+{% set phase_from_grains  = salt['grains.get']('phase',  None) %}
+{% if region_from_grains is not none %}{% set _ = cfg.update({'region': region_from_grains}) %}{% endif %}
+{% if phase_from_grains  is not none %}{% set _ = cfg.update({'phase':  phase_from_grains }) %}{% endif %}
+
 {% set dyn = {
   'minion_id': salt['pillar.get']('minion_id', gm.get('minion_id', 'unknown')),
   'timestamp': salt['pillar.get']('timestamp',  gm.get('timestamp', '')),
@@ -34,5 +39,4 @@
 {% else %}
   {% set push_url = '' %}
 {% endif %}
-
 {% do cfg.update({'push_url': push_url}) %}
