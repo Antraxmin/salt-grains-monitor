@@ -71,8 +71,10 @@ get-last-ts:
     - onlyif:
       - salt: read-last-ts
 
-{# ---- Jinja 판단 ---- #}
-{% set base_ref = salt['file.read'](last_ref_f) if salt['file.file_exists'](last_ref_f) else 'origin/' + branch %}
+{# ---- Jinja 판단 (robust base_ref) ---- #}
+{% set _exists = salt['file.file_exists'](last_ref_f) %}
+{% set _raw    = salt['file.read'](last_ref_f) if _exists else '' %}
+{% set base_ref = (_raw.strip() if _raw and _raw.strip() else 'origin/' ~ branch) %}
 {% set last_ts  = (salt['file.read'](last_ts_f) if salt['file.file_exists'](last_ts_f) else '0')|int %}
 {% set now_ts   = salt['cmd.run_stdout']('date +%s')|int %}
 {% set age      = now_ts - last_ts %}
@@ -112,17 +114,25 @@ collect-commits:
     - name: cmd.run_stdout
     - tgt: 'salt-master'
     - kwarg:
-        cmd: "git -C {{ repo }} log --no-merges --pretty='%H|%s' --reverse {{ base_ref }}..HEAD || true"
+        cmd: "git -C {{ repo }} log --no-merges --pretty='%H|%s' --reverse {{ base_ref }}..HEAD -- 'grains/*/*/*' || true"
         python_shell: True
     - require:
       - salt: new-head
+      
+# ─ 커밋 목록 계산 ─
+{% set rows = salt['cmd.run_stdout'](
+    'git -C {} log --no-merges --pretty="%H|%s" --reverse {}..HEAD -- \'grains/*/*/*\' || true'
+    .format(repo, base_ref)
+).splitlines() %}
+{% set have_wh = wh|default('', true) %}  {# 빈문자열이면 False처럼 취급 #}
 
-{# ─ 커밋별 Dooray 전송: grains/<region>/<phase>/<minion> 경로만 집계 ─ #}
-{% set rows = salt['cmd.run_stdout']('git -C {} log --no-merges --pretty="%H|%s" --reverse {}..HEAD || true'.format(repo, base_ref)).splitlines() %}
+# ─ 커밋별 Dooray 전송 (선택) ─
 {% for row in rows[:maxcomm] %}
-{% set h = row.split('|',1)[0] %}
-{% set subj = row.split('|',1)[1] if '|' in row else '(no subject)' %}
+{% set parts = row.split('|', 1) %}
+{% set h     = parts[0] %}
+{% set subj  = parts[1] if parts|length > 1 else '(no subject)' %}
 
+{% if have_wh %}
 commit-{{ h[:7] }}-notify:
   salt.function:
     - name: http.query
@@ -131,24 +141,26 @@ commit-{{ h[:7] }}-notify:
         url: {{ wh }}
         method: POST
         header_dict: {'Content-Type': 'application/json'}
+        status: True
+        text: True
+        decode: True
         data: |
           {{ salt['slsutil.serialize']('json', {
-            'botName': 'grains-batch (' ~ (salt['cmd.run_stdout'](
-              "git -C {} diff-tree --no-commit-id --name-only -r {} -- 'grains/*/*/*' | "
-              "awk -F/ '/^grains\\/[^\\/]+\\/[^\\/]+\\/[^\\/]+$/ {print $2\"/\"$3\":\"$4}' | "
-              "sort -u | paste -sd \", \" -".format(repo, h)
-            ) or 'unknown') ~ ')',
+            'botName': 'grains-batch',
             'text': (
               '**Pushed 1 commit to ' ~ branch ~ '**\n\n' ~
               '- [`' ~ h[:7] ~ '`](' ~ gh ~ '/commit/' ~ h ~ ') **' ~ subj ~ '**  \n' ~
-              '```diff\n' ~ (salt['cmd.run_stdout'](
-                "git -C {} show --no-color --unified=0 {} -- 'grains/*/*/*' | "
-                "sed -n 's/^[+-][^-+].*$/\\0/p'".format(repo, h)
-              )[:diffmax]) ~ '\n```'
+              '```diff\n' ~ (
+                salt['cmd.run_stdout'](
+                  "git -C {} show --no-color --unified=0 {} -- 'grains/*/*/*' | "
+                  "sed -n 's/^[+-][^-+].*$/\\0/p'".format(repo, h)
+                )[:diffmax]
+              ) ~ '\n```'
             )
           }) }}
     - require:
       - salt: collect-commits
+{% endif %}
 
 {% endfor %}
 
@@ -175,4 +187,3 @@ noop-no-push:
     - name: "No push (to_push={{ to_push }}, age={{ age }}s; min_commits={{ minc }}, max_age={{ maxage }})"
 
 {% endif %}
-

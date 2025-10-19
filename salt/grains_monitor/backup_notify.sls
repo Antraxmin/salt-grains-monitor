@@ -58,12 +58,12 @@ git_prepare:
 commit_only_no_push:
   cmd.run:
     - name: |
-        set -euo pipefail
-        FILE="{{ grains_file | replace(git_repo_path ~ '/', '') }}"
+        set -eu
+        FILE="grains/{{ cfg.region }}/{{ cfg.phase }}/{{ minion_id }}"
         if ! git diff --cached --quiet -- "$FILE"; then
           git commit -m "Grains changed on {{ minion_id }} ({{ cfg.region }}/{{ cfg.phase }}) at {{ timestamp }}"
         else
-          COMMIT_COUNT=$(git log --oneline -- "$FILE" 2>/dev/null | wc -l || echo 0)
+          COMMIT_COUNT=$(git rev-list --count -- "$FILE" 2>/dev/null || echo 0)
           if [ "$COMMIT_COUNT" -eq 0 ]; then
             git commit -m "Initial grains setup for {{ minion_id }} ({{ cfg.region }}/{{ cfg.phase }}) at {{ timestamp }}"
           fi
@@ -71,3 +71,4 @@ commit_only_no_push:
     - cwd: {{ git_repo_path }}
     - require:
       - cmd: git_prepare
+
