@@ -1,11 +1,13 @@
 {% set P = salt['pillar.get']('grains_monitor:push', {}) %}
-{% set every = P.get('schedule_minutes', 3) %}
-{% set splay = P.get('splay_seconds', 15) %}
+{% set every = P.get('schedule_seconds', 10) %}  
+{% set splay = P.get('splay_seconds', 3) %}      
 
 grains-push-batch:
   schedule.present:
     - function: state.orchestrate
-    - job_args: [orch.grains_push_orch]
-    - minutes: {{ every }}
+    - job_kwargs:
+        mods: orch.grains_push_orch
+    - seconds: {{ every }}   
     - splay: {{ splay }}
     - maxrunning: 1
+    - enabled: True
