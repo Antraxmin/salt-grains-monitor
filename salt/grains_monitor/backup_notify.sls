@@ -61,83 +61,90 @@ commit_and_notify:
   cmd.run:
     - name: |
         set -e
+        build_commit_url() {
+          # Args: <commit-hash>
+          local ch="$1"
+          local remote_url base_url owner_repo aux aux_san
+          remote_url="$(git remote get-url origin 2>/dev/null || true)"
+          if printf '%s' "$remote_url" | grep -qE '^https?://'; then
+            remote_url="$(printf '%s' "$remote_url" | sed -E 's#^https?://[^@]+@#https://#')"
+          fi
+          if printf '%s' "$remote_url" | grep -qE '^git@github\.com:'; then
+            owner_repo="${remote_url#git@github.com:}"
+            owner_repo="${owner_repo%.git}"
+            base_url="https://github.com/${owner_repo}"
+          elif printf '%s' "$remote_url" | grep -qE '^https?://github\.com/'; then
+            owner_repo="${remote_url#https://github.com/}"
+            owner_repo="${owner_repo#http://github.com/}"
+            owner_repo="${owner_repo%.git}"
+            base_url="https://github.com/${owner_repo}"
+          else
+            aux="{{ github_repo }}"
+            if [ -n "$aux" ]; then
+              aux_san="$(printf '%s' "$aux" | sed -E 's#^https?://[^@]+@#https://#')"
+              if printf '%s' "$aux_san" | grep -qE '^git@github\.com:'; then
+                owner_repo="${aux_san#git@github.com:}"
+              else
+                owner_repo="${aux_san#https://github.com/}"
+                owner_repo="${owner_repo#http://github.com/}"
+              fi
+              owner_repo="${owner_repo%.git}"
+              base_url="https://github.com/${owner_repo}"
+            else
+              base_url=""
+            fi
+          fi
 
-        COMMIT_COUNT=$(git log --oneline -- grains/{{ minion_id }} 2>/dev/null | wc -l || echo 0)
+          if [ -n "$base_url" ] && [ -n "$ch" ]; then
+            printf '%s/commit/%s' "$base_url" "$ch"
+          else
+            printf ''
+          fi
+        }
+        COMMIT_COUNT="$(git log --oneline -- grains/{{ minion_id }} 2>/dev/null | wc -l || echo 0)"
+
         if [ "$COMMIT_COUNT" -gt 0 ]; then
-          DIFF=$(
+          DIFF="$(
             git diff --no-color --cached --unified=0 -- grains/{{ minion_id }} \
             | sed -n 's/^\([+-][^-+].*\)$/\1/p'
-          )
+          )"
+
           if [ -n "$DIFF" ]; then
             git commit -m "Grains changed on {{ minion_id }} at {{ timestamp }}"
-            COMMIT_HASH=$(git rev-parse HEAD)
-            {% if push_url %}
-            git push {{ push_url|quote }} {{ git_branch|quote }}
-            {% else %}
-            git push origin {{ git_branch|quote }}
-            {% endif %}
-            DIFF_TRUNCATED=$(printf "%s\n" "$DIFF" | head -c {{ diff_max_chars }})
-            REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
-            if printf '%s' "$REMOTE_URL" | grep -q '^git@github\.com:'; then
-              OWNER_REPO=${REMOTE_URL#git@github.com:}; OWNER_REPO=${OWNER_REPO%.git}
-              BASE_URL="https://github.com/$OWNER_REPO"
-            elif printf '%s' "$REMOTE_URL" | grep -q '^https\?://github\.com/'; then
-              OWNER_REPO=${REMOTE_URL#https://github.com/}; OWNER_REPO=${OWNER_REPO#http://github.com/}
-              OWNER_REPO=${OWNER_REPO%.git}
-              BASE_URL="https://github.com/$OWNER_REPO"
-            else
-              BASE_URL=""
-            fi
-            [ -n "$BASE_URL" ] && COMMIT_URL="$BASE_URL/commit/$COMMIT_HASH" || COMMIT_URL=""
-
-            JSON_PAYLOAD=$(jq -n \
-              --arg minion "{{ minion_id }}" \
-              --arg url    "$COMMIT_URL" \
-              --arg diff   "$DIFF_TRUNCATED" \
-              '{
-                 botName: $minion,
-                 text: ("[변경 내역 확인하기(Git Repository)](" + $url + ")\n\n```diff\n" + $diff + "\n```")
-               }')
+            COMMIT_HASH="$(git rev-parse HEAD)"
+            DIFF_TRUNCATED="$(printf "%s\n" "$DIFF" | head -c {{ diff_max_chars }})"
+            COMMIT_URL="$(build_commit_url "$COMMIT_HASH")"
 
             if [ -n "{{ webhook_url }}" ]; then
+              JSON_PAYLOAD="$(jq -n \
+                --arg minion "{{ minion_id }}" \
+                --arg url    "$COMMIT_URL" \
+                --arg diff   "$DIFF_TRUNCATED" \
+                '{
+                   botName: $minion,
+                   text: ("[변경 내역 확인하기(Git Repository)](" + $url + ")\n\n```diff\n" + $diff + "\n```")
+                 }')"
               curl -sS -X POST {{ webhook_url|quote }} \
                    -H 'Content-Type: application/json' \
-                   -d "$JSON_PAYLOAD" >/dev/null
+                   -d "$JSON_PAYLOAD" >/dev/null || true
             fi
           fi
         else
           git commit -m "Initial grains setup for {{ minion_id }} at {{ timestamp }}"
-          COMMIT_HASH=$(git rev-parse HEAD)
+          COMMIT_HASH="$(git rev-parse HEAD)"
+          COMMIT_URL="$(build_commit_url "$COMMIT_HASH")"
 
-          {% if push_url %}
-          git push {{ push_url|quote }} {{ git_branch|quote }}
-          {% else %}
-          git push origin {{ git_branch|quote }}
-          {% endif %}
-
-          REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
-          if printf '%s' "$REMOTE_URL" | grep -q '^git@github\.com:'; then
-            OWNER_REPO=${REMOTE_URL#git@github.com:}; OWNER_REPO=${OWNER_REPO%.git}
-            BASE_URL="https://github.com/$OWNER_REPO"
-          elif printf '%s' "$REMOTE_URL" | grep -q '^https\?://github\.com/'; then
-            OWNER_REPO=${REMOTE_URL#https://github.com/}; OWNER_REPO=${OWNER_REPO#http://github.com/}
-            OWNER_REPO=${OWNER_REPO%.git}
-            BASE_URL="https://github.com/$OWNER_REPO"
-          else
-            BASE_URL=""
-          fi
-          [ -n "$BASE_URL" ] && COMMIT_URL="$BASE_URL/commit/$COMMIT_HASH" || COMMIT_URL=""
           if [ -n "{{ webhook_url }}" ]; then
-            JSON_PAYLOAD=$(jq -n \
+            JSON_PAYLOAD="$(jq -n \
               --arg minion "{{ minion_id }}" \
               --arg url    "$COMMIT_URL" \
               '{
                  botName: $minion,
-                 text: ("[Grains monitoring initialized on " + $minion + "](" + $url + ")")
-               }')
+                 text: ("[Grains initialized on " + $minion + "](" + $url + ")")
+               }')"
             curl -sS -X POST {{ webhook_url|quote }} \
                  -H 'Content-Type: application/json' \
-                 -d "$JSON_PAYLOAD" >/dev/null
+                 -d "$JSON_PAYLOAD" >/dev/null || true
           fi
         fi
     - cwd: {{ git_repo_path }}
