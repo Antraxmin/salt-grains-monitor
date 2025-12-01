@@ -76,7 +76,7 @@ commit_and_notify:
                 --arg diff   "$DIFF_TRUNCATED" \
                 '{
                    botName: $minion,
-                   text: ("[변경 내역 확인하기(Git Repository)](" + $url + ")\n\n```diff\n" + $diff + "\n```")
+                   text: ("[변경 내역 확인하기(Git Repository)](" + $url + ")\nchange: " + $minion + "\n\n```diff\n" + $diff + "\n```")
                  }')"
               curl -sS -X POST {{ webhook_url|quote }} -H 'Content-Type: application/json' -d "$JSON_PAYLOAD" >/dev/null || true
             fi
